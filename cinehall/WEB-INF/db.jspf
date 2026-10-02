@@ -1,0 +1,95 @@
+<%@ page import="java.sql.*, java.util.*, java.security.*, javax.crypto.*, javax.crypto.spec.*" %>
+<%!
+  // ============ DATABASE CONFIGURATION (edit these 3 lines) ============
+  static final String DB_URL  = "jdbc:postgresql://localhost:5432/Cinehall";
+  static final String DB_USER = "postgres";
+  static final String DB_PASS = "######";   //password
+  // Admin login (the team schema has no admin table, so it lives here).
+  // Default: admin / admin123.  Make a new hash with the PBKDF2 helper in README-SETUP.md.
+  static final String ADMIN_USER = "admin";
+  static final String ADMIN_HASH = "a1b2c3d4e5f60718293a4b5c6d7e8f90:a7440f397c851abab1e5f539c0fdd64d12c13b675ce7145cde94aeb8b2f8b574";
+  // =====================================================================
+
+  Connection getConn() throws Exception {
+    Class.forName("org.postgresql.Driver");
+    return DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
+  }
+
+  // ---------- JSON helpers ----------
+  String esc(String s) {
+    if (s == null) return "";
+    StringBuilder b = new StringBuilder();
+    for (char ch : s.toCharArray()) {
+      switch (ch) {
+        case '"':  b.append("\\\""); break;
+        case '\\': b.append("\\\\"); break;
+        case '\n': b.append("\\n");  break;
+        case '\r': b.append("\\r");  break;
+        case '\t': b.append("\\t");  break;
+        default:   if (ch < 0x20) b.append(String.format("\\u%04x", (int) ch)); else b.append(ch);
+      }
+    }
+    return b.toString();
+  }
+  String str(String s) { return "\"" + esc(s) + "\""; }
+  String fail(String msg) { return "{\"ok\":false,\"error\":" + str(msg) + "}"; }
+
+  /** Runs a query that returns ONE json column and returns it (or "[]"). */
+  String jsonQuery(Connection c, String sql, Object... params) throws SQLException {
+    PreparedStatement p = c.prepareStatement(sql);
+    for (int i = 0; i < params.length; i++) p.setObject(i + 1, params[i]);
+    ResultSet rs = p.executeQuery();
+    String r = rs.next() ? rs.getString(1) : null;
+    rs.close(); p.close();
+    return r == null ? "[]" : r;
+  }
+
+  // Same shape the front-end already used: {id, showId, movieId, seats[], total, name, email, phone, code, status, timestamp}
+  static final String BOOKING_JSON =
+    "SELECT coalesce(json_agg(json_build_object(" +
+    " 'id', b.booking_id::text, 'showId', b.showtime_id::text, 'movieId', st.movie_id::text," +
+    " 'seats', (SELECT coalesce(json_agg(se.seat_row || se.seat_number ORDER BY se.seat_row, se.seat_number), '[]'::json)" +
+    "           FROM booking_seat bs JOIN seat se ON se.seat_id = bs.seat_id WHERE bs.booking_id = b.booking_id)," +
+    " 'total', b.total_amount, 'name', c.name, 'email', c.email, 'phone', c.phone," +
+    " 'code', b.ticket_code, 'status', lower(b.status), 'timestamp', b.booking_time) ORDER BY b.booking_id DESC), '[]'::json)" +
+    " FROM booking b JOIN customer c ON c.customer_id = b.customer_id" +
+    " JOIN showtime st ON st.showtime_id = b.showtime_id ";
+
+  // ---------- session helpers ----------
+  boolean isRole(HttpSession s, String role) { return role.equals(s.getAttribute("role")); }
+  String sessionJson(HttpSession s) {
+    String role = (String) s.getAttribute("role");
+    if (role == null) return "null";
+    return "{\"role\":" + str(role) + ",\"name\":" + str((String) s.getAttribute("name")) +
+           ",\"email\":" + str((String) s.getAttribute("email")) +
+           ",\"phone\":" + str((String) s.getAttribute("phone")) + "}";
+  }
+
+  // ---------- password hashing (PBKDF2, stored as saltHex:hashHex) ----------
+  String hex(byte[] b) { StringBuilder s = new StringBuilder(); for (byte x : b) s.append(String.format("%02x", x)); return s.toString(); }
+  byte[] unhex(String h) { byte[] o = new byte[h.length() / 2]; for (int i = 0; i < o.length; i++) o[i] = (byte) Integer.parseInt(h.substring(2 * i, 2 * i + 2), 16); return o; }
+  byte[] pbkdf2(String pw, byte[] salt) throws Exception {
+    return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(new PBEKeySpec(pw.toCharArray(), salt, 65536, 256)).getEncoded();
+  }
+  String hashPw(String pw) throws Exception {
+    byte[] salt = new byte[16]; new SecureRandom().nextBytes(salt);
+    return hex(salt) + ":" + hex(pbkdf2(pw, salt));
+  }
+  boolean verifyPw(String pw, String stored) {
+    try {
+      String[] parts = stored.split(":");
+      return MessageDigest.isEqual(unhex(parts[1]), pbkdf2(pw, unhex(parts[0])));
+    } catch (Exception e) { return false; }
+  }
+
+  // "7:15 PM", "07:15 PM" or "19:15" -> java.sql.Time (null if invalid)
+  java.sql.Time parseTime(String s) {
+    if (s == null) return null;
+    s = s.trim().toUpperCase();
+    for (String f : new String[]{"h:mm a", "hh:mm a", "H:mm"}) {
+      try { return java.sql.Time.valueOf(java.time.LocalTime.parse(s, java.time.format.DateTimeFormatter.ofPattern(f, Locale.ENGLISH))); }
+      catch (Exception ignore) { }
+    }
+    return null;
+  }
+%>
