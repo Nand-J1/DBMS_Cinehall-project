@@ -1,0 +1,110 @@
+-- Create Database (Run this separately if needed in your psql terminal)
+-- CREATE DATABASE cinehall_db;
+-- \c cinehall;
+
+-- 1. Theatre Table
+CREATE TABLE Theatre (
+    theatre_id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    location VARCHAR(255) NOT NULL,
+    contact_info VARCHAR(50) NOT NULL,
+    total_screens INT NOT NULL
+);
+
+-- 2. Screen Table
+CREATE TABLE Screen (
+    screen_id SERIAL PRIMARY KEY,
+    theatre_id INT NOT NULL,
+    screen_number INT NOT NULL,
+    seating_capacity INT NOT NULL,
+    CONSTRAINT fk_screen_theatre FOREIGN KEY (theatre_id) REFERENCES Theatre(theatre_id) ON DELETE CASCADE
+);
+
+-- 3. Movie Table
+CREATE TABLE Movie (
+    movie_id SERIAL PRIMARY KEY,
+    title VARCHAR(150) NOT NULL,
+    genre VARCHAR(50) NOT NULL,
+    language VARCHAR(50) NOT NULL,
+    duration INT NOT NULL, -- in minutes
+    certificate VARCHAR(10) NOT NULL,
+    status VARCHAR(20) NOT NULL, -- 'Now Showing' or 'Coming Soon'
+    synopsis TEXT,
+    rating DECIMAL(3,1)
+);
+
+-- 4. Showtime Table
+CREATE TABLE Showtime (
+    showtime_id SERIAL PRIMARY KEY,
+    movie_id INT NOT NULL,
+    screen_id INT NOT NULL,
+    show_date DATE NOT NULL,
+    show_time TIME NOT NULL,
+    silver_price DECIMAL(8,2) NOT NULL,
+    gold_price DECIMAL(8,2) NOT NULL,
+    premium_price DECIMAL(8,2) NOT NULL,
+    CONSTRAINT fk_showtime_movie FOREIGN KEY (movie_id) REFERENCES Movie(movie_id) ON DELETE CASCADE,
+    CONSTRAINT fk_showtime_screen FOREIGN KEY (screen_id) REFERENCES Screen(screen_id) ON DELETE CASCADE
+);
+
+-- 5. Seat Table
+CREATE TABLE Seat (
+    seat_id SERIAL PRIMARY KEY,
+    screen_id INT NOT NULL,
+    seat_row VARCHAR(2) NOT NULL, -- Using VARCHAR since CHAR pads with spaces
+    seat_number INT NOT NULL,
+    seat_type VARCHAR(20) NOT NULL, -- 'Silver', 'Gold', 'Premium'
+    CONSTRAINT fk_seat_screen FOREIGN KEY (screen_id) REFERENCES Screen(screen_id) ON DELETE CASCADE
+);
+
+-- 6. Customer Table
+CREATE TABLE Customer (
+    customer_id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    phone VARCHAR(15) NOT NULL,
+    password VARCHAR(255) NOT NULL
+);
+
+-- 7. Booking Table
+CREATE TABLE Booking (
+    booking_id SERIAL PRIMARY KEY,
+    customer_id INT NOT NULL,
+    showtime_id INT NOT NULL,
+    ticket_code VARCHAR(20) UNIQUE NOT NULL,
+    booking_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    total_amount DECIMAL(8,2) NOT NULL,
+    status VARCHAR(20) NOT NULL, -- 'Confirmed', 'Cancelled'
+    CONSTRAINT fk_booking_customer FOREIGN KEY (customer_id) REFERENCES Customer(customer_id) ON DELETE CASCADE,
+    CONSTRAINT fk_booking_showtime FOREIGN KEY (showtime_id) REFERENCES Showtime(showtime_id) ON DELETE CASCADE
+);
+
+-- 8. Booking_Seat Mapping Table (For multi-seat bookings)
+CREATE TABLE Booking_Seat (
+    booking_seat_id SERIAL PRIMARY KEY,
+    booking_id INT NOT NULL,
+    seat_id INT NOT NULL,
+    CONSTRAINT fk_bseat_booking FOREIGN KEY (booking_id) REFERENCES Booking(booking_id) ON DELETE CASCADE,
+    CONSTRAINT fk_bseat_seat FOREIGN KEY (seat_id) REFERENCES Seat(seat_id) ON DELETE CASCADE
+);
+
+-- 9. Payment Table
+CREATE TABLE Payment (
+    payment_id SERIAL PRIMARY KEY,
+    booking_id INT NOT NULL,
+    amount DECIMAL(8,2) NOT NULL,
+    payment_method VARCHAR(30) NOT NULL, -- 'UPI', 'Credit Card', 'Debit Card'
+    payment_status VARCHAR(20) NOT NULL, -- 'Successful', 'Failed'
+    payment_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_payment_booking FOREIGN KEY (booking_id) REFERENCES Booking(booking_id) ON DELETE CASCADE
+);
+
+-- 10. Cancellation Table
+CREATE TABLE Cancellation (
+    cancellation_id SERIAL PRIMARY KEY,
+    booking_id INT NOT NULL,
+    refund_status VARCHAR(20) NOT NULL, -- 'Processed', 'Pending'
+    reason TEXT,
+    cancelled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_cancellation_booking FOREIGN KEY (booking_id) REFERENCES Booking(booking_id) ON DELETE CASCADE
+);
